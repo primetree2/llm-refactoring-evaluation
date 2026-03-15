@@ -1,6 +1,3 @@
-
-
-```python
 """Genetic algorithm to evolve a string toward a target string."""
 
 import random
@@ -219,4 +216,3 @@ if __name__ == "__main__":
     print(f"\nGeneration: {generation}")
     print(f"Total Population: {total_pop}")
     print(f"Target: {result}")
-```
