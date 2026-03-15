@@ -1,0 +1,7 @@
+pylint
+nltk
+rouge-score
+pandas
+numpy
+matplotlib
+seaborn
