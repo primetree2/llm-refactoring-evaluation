@@ -1,171 +1,151 @@
-You are an expert code refactoring
-assistant. Your task is to rewrite the
-given code to improve its readability, maintainability, and adherence to
-best practices without altering its
-core functionality. Add appropriate
-comments and docstrings. Ensure the
-code follows language-specific
-conventions. Return only the
-refactored code in a markdown code
-block without explanations.
-Refactor the following code from the file
-’{file_path}’. Return ONLY the
-complete, refactored code inside a
-single markdown code block. Do not add
-any explanations before or after the
-code block.
-Original code: {
+"""Simplex tableau implementation for linear programming."""
+
+from typing import Dict, List, Tuple
+
 import numpy as np
 
 
 class Tableau:
+    """Simplex tableau supporting one- and two-phase methods."""
 
     maxiter = 100
 
-    def __init__(self, tab, nv, na):
+    def __init__(self, tab: np.ndarray, nv: int, na: int) -> None:
+        """Initialize a new simplex tableau.
 
-        # terrible validation style
-        if tab.dtype != "float64":
-            raise TypeError("Tableau must have type float64")
+        Args:
+            tab: Initial tableau (must be of dtype float64).
+            nv: Number of decision (original) variables.
+            na: Number of artificial variables.
 
-        if not (tab[:, -1] >= 0).all():
-            raise ValueError("RHS must be > 0")
-
-        if nv < 2 or na < 0:
-            raise ValueError("number of (artificial) variables must be a natural number")
+        Raises:
+            TypeError: If tableau dtype is not float64.
+            ValueError: If RHS is negative or variable counts are invalid.
+        """
+        self._validate_inputs(tab, nv, na)
 
         self.tableau = tab
-        self.n_rows = tab.shape[0]
-        self.n_cols = tab.shape[1]
+        self.n_rows, self.n_cols = tab.shape
 
         self.n_vars = nv
         self.n_artificial_vars = na
-
-        # confusing stage calculation
-        if self.n_artificial_vars > 0:
-            self.n_stages = 2
-        else:
-            self.n_stages = 1
-
+        self.n_stages = 2 if na > 0 else 1
         self.n_slack = self.n_cols - self.n_vars - self.n_artificial_vars - 1
 
-        self.objectives = []
-        self.objectives.append("max")
-
-        if self.n_artificial_vars:
+        self.objectives: List[str] = ["max"]
+        if self.n_artificial_vars > 0:
             self.objectives.append("min")
 
-        self.col_titles = self._gen_titles()
+        self.col_titles = self._generate_column_titles()
 
         self.row_idx = None
         self.col_idx = None
-
         self.stop_iter = False
 
-    def _gen_titles(self):
+    @staticmethod
+    def _validate_inputs(tab: np.ndarray, nv: int, na: int) -> None:
+        """Validate constructor arguments."""
+        if tab.dtype != np.float64:
+            raise TypeError("Tableau must have type float64")
 
-        titles = []
-        i = 0
-        while i < self.n_vars:
-            titles.append("x" + str(i + 1))
-            i += 1
+        if not (tab[:, -1] >= 0).all():
+            raise ValueError("RHS must be >= 0")
 
-        j = 0
-        while j < self.n_slack:
-            titles.append("s" + str(j + 1))
-            j += 1
+        if nv < 2 or na < 0:
+            raise ValueError(
+                "number of (artificial) variables must be a natural number"
+            )
 
+    def _generate_column_titles(self) -> List[str]:
+        """Generate column header names for variables and RHS."""
+        titles = [f"x{i + 1}" for i in range(self.n_vars)]
+        titles.extend(f"s{j + 1}" for j in range(self.n_slack))
         titles.append("RHS")
-
         return titles
 
-    def find_pivot(self):
+    def find_pivot(self) -> Tuple[int, int]:
+        """Determine the pivot element using the current objective.
 
+        Returns:
+            Tuple of (pivot_row, pivot_col). Returns (0, 0) and flags
+            stop_iter when the current stage has reached optimality.
+        """
         objective = self.objectives[-1]
+        sign = 1 if objective == "min" else -1
 
-        if objective == "min":
-            sign = 1
-        else:
-            sign = -1
-
-        row0 = self.tableau[0, :-1]
-
-        # inefficient manual search
-        maxval = None
-        idx = 0
-        i = 0
-        while i < len(row0):
-            val = sign * row0[i]
-            if maxval is None or val > maxval:
-                maxval = val
-                idx = i
-            i += 1
-
-        col_idx = idx
+        objective_row = self.tableau[0, :-1]
+        col_idx = int(np.argmax(sign * objective_row))
 
         if sign * self.tableau[0, col_idx] <= 0:
             self.stop_iter = True
             return 0, 0
 
-        s = slice(self.n_stages, self.n_rows)
+        constraint_slice = slice(self.n_stages, self.n_rows)
+        rhs = self.tableau[constraint_slice, -1]
+        col = self.tableau[constraint_slice, col_idx]
 
-        rhs = self.tableau[s, -1]
-        col = self.tableau[s, col_idx]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratios = np.where(col > 0, rhs / col, np.nan)
 
-        q = []
-        for i in range(len(rhs)):
-            if col[i] > 0:
-                q.append(rhs[i] / col[i])
-            else:
-                q.append(np.nan)
-
-        q = np.array(q)
-
-        row_idx = np.nanargmin(q) + self.n_stages
-
+        row_idx = int(np.nanargmin(ratios)) + self.n_stages
         return row_idx, col_idx
 
-    def pivot(self, r, c):
+    def pivot(self, r: int, c: int) -> np.ndarray:
+        """Execute the pivot operation on the tableau.
 
-        piv_row = self.tableau[r].copy()
-        piv_val = piv_row[c]
+        Args:
+            r: Pivot row index.
+            c: Pivot column index.
 
-        piv_row = piv_row * (1 / piv_val)
+        Returns:
+            Updated tableau.
+        """
+        pivot_row = self.tableau[r].copy()
+        pivot_val = pivot_row[c]
+        normalized = pivot_row / pivot_val
 
-        for i in range(len(self.tableau)):
-            coeff = self.tableau[i][c]
-            self.tableau[i] = self.tableau[i] + (-coeff * piv_row)
+        for i in range(self.n_rows):
+            coeff = self.tableau[i, c]
+            self.tableau[i] = self.tableau[i] - coeff * normalized
 
-        self.tableau[r] = piv_row
-
+        self.tableau[r] = normalized
         return self.tableau
 
-    def change_stage(self):
+    def change_stage(self) -> np.ndarray:
+        """Remove artificial variables and auxiliary objective row.
 
-        if len(self.objectives) > 0:
+        Returns:
+            Updated tableau for the next stage.
+        """
+        if self.objectives:
             self.objectives.pop()
 
         if not self.objectives:
             return self.tableau
 
-        s = slice(-self.n_artificial_vars - 1, -1)
-
-        self.tableau = np.delete(self.tableau, s, axis=1)
+        # Remove artificial variable columns
+        artificial_slice = slice(-self.n_artificial_vars - 1, -1)
+        self.tableau = np.delete(self.tableau, artificial_slice, axis=1)
+        # Remove auxiliary objective row
         self.tableau = np.delete(self.tableau, 0, axis=0)
 
+        self.n_rows, self.n_cols = self.tableau.shape
         self.n_stages = 1
-        self.n_rows -= 1
         self.n_artificial_vars = 0
+        self.n_slack = self.n_cols - self.n_vars - 1
         self.stop_iter = False
 
         return self.tableau
 
-    def run_simplex(self):
+    def run_simplex(self) -> Dict[str, float]:
+        """Run the full simplex algorithm.
 
-        loop = 0
-
-        while loop < Tableau.maxiter:
-
+        Returns:
+            Dictionary with objective value "P" and basic variable values,
+            or empty dict if maximum iterations are exceeded.
+        """
+        iteration = 0
+        while iteration < self.maxiter:
             if not self.objectives:
                 return self._interpret()
 
@@ -176,33 +156,30 @@ class Tableau:
             else:
                 self.tableau = self.pivot(r, c)
 
-            loop += 1
+            iteration += 1
 
         return {}
 
-    def _interpret(self):
+    def _interpret(self) -> Dict[str, float]:
+        """Extract solution values from the final tableau.
 
-        out = {}
-        out["P"] = abs(self.tableau[0, -1])
+        Returns:
+            Dictionary containing the objective and basic variable values.
+        """
+        solution: Dict[str, float] = {"P": abs(self.tableau[0, -1])}
 
         for i in range(self.n_vars):
+            nz_rows = np.nonzero(self.tableau[:, i])[0]
 
-            nz = np.nonzero(self.tableau[:, i])
-            rows = nz[0]
+            if len(nz_rows) == 1:
+                row = nz_rows[0]
+                if self.tableau[row, i] == 1.0:
+                    solution[self.col_titles[i]] = self.tableau[row, -1]
 
-            if len(rows) == 1:
-
-                r = rows[0]
-                val = self.tableau[r, i]
-
-                if val == 1:
-                    out[self.col_titles[i]] = self.tableau[r, -1]
-
-        return out
+        return solution
 
 
 if __name__ == "__main__":
-
     import doctest
 
-    doctest.testmod()}
+    doctest.testmod()
