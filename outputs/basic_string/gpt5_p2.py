@@ -1,4 +1,3 @@
-```python
 """Genetic algorithm for evolving a string toward a target value."""
 
 from __future__ import annotations
@@ -226,4 +225,3 @@ if __name__ == "__main__":
     print("\nGeneration:", generation)
     print("Total Population:", population)
     print("Target:", target)
-```
