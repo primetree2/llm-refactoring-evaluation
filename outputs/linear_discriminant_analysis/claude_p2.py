@@ -1,6 +1,3 @@
-
-
-```python
 """
 Linear Discriminant Analysis (LDA) implementation.
 
@@ -311,4 +308,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-```
